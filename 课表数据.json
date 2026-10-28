@@ -1,0 +1,30 @@
+{
+  "config": {
+    "version": 1,
+    "term": "2026-2027学年第1学期",
+    "classMode": "big",
+    "sections": 4,
+    "days": 7,
+    "dayLabels": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
+    "totalWeeks": 20,
+    "semesterStart": "",
+    "sectionTimes": ["08:00–09:40", "10:00–11:40", "13:30–15:10", "15:30–17:10"]
+  },
+  "courses": [
+    {"id": "c1", "name": "Python语言程序设计及实验", "teacher": "段聪颖", "location": "J1-413", "day": 1, "start": 1, "end": 1, "week": "5-8", "color": "#4f86f7", "note": ""},
+    {"id": "c2", "name": "操作系统", "teacher": "宋野", "location": "J1-521", "day": 1, "start": 2, "end": 2, "week": "3-16", "color": "#f6a609", "note": "教师名以教务系统为准"},
+    {"id": "c3", "name": "软件设计模式", "teacher": "吴琼", "location": "J1-413", "day": 2, "start": 2, "end": 2, "week": "1-16", "color": "#2bb673", "note": ""},
+    {"id": "c4", "name": "习近平新时代中国特色社会主义思想概论", "teacher": "张琪琪", "location": "J3-508", "day": 3, "start": 2, "end": 2, "week": "1-11", "color": "#e0506b", "note": ""},
+    {"id": "c5", "name": "操作系统", "teacher": "宋野", "location": "J1-521", "day": 4, "start": 2, "end": 2, "week": "1-16", "color": "#f6a609", "note": "教师名以教务系统为准"},
+    {"id": "c6", "name": "大学生就业指导", "teacher": "郑云鹏", "location": "J3-210", "day": 1, "start": 3, "end": 3, "week": "5-12", "color": "#f0883e", "note": ""},
+    {"id": "c7", "name": "软件工程", "teacher": "李颖", "location": "J1-401", "day": 2, "start": 3, "end": 3, "week": "1-16", "color": "#9b59b6", "note": ""},
+    {"id": "c8", "name": "Web框架技术及实验", "teacher": "裴志松", "location": "J1-413", "day": 3, "start": 3, "end": 3, "week": "1-16", "color": "#16b5c4", "note": ""},
+    {"id": "c9", "name": "软件工程", "teacher": "李颖", "location": "J1-401", "day": 4, "start": 3, "end": 3, "week": "1-8", "color": "#9b59b6", "note": ""},
+    {"id": "c10", "name": "Python语言程序设计及实验", "teacher": "段聪颖", "location": "J1-413", "day": 5, "start": 3, "end": 3, "week": "1-16", "color": "#4f86f7", "note": ""},
+    {"id": "c11", "name": "习近平新时代中国特色社会主义思想概论", "teacher": "张琪瑶", "location": "J5-508", "day": 1, "start": 4, "end": 4, "week": "1-10", "color": "#e0506b", "note": ""},
+    {"id": "c12", "name": "专业日语（上）", "teacher": "朱雨晴", "location": "J2-512", "day": 2, "start": 4, "end": 4, "week": "1-16", "color": "#6c5ce7", "note": ""},
+    {"id": "c13", "name": "Web框架技术及实验", "teacher": "裴志松", "location": "J1-413", "day": 4, "start": 4, "end": 4, "week": "1-16", "color": "#16b5c4", "note": ""},
+    {"id": "c14", "name": "Web框架技术及实验", "teacher": "裴志松", "location": "J1-413", "day": 5, "start": 4, "end": 4, "week": "1-8", "color": "#16b5c4", "note": ""}
+  ],
+  "view": { "currentWeek": 1 }
+}
