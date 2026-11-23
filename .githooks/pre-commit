@@ -1,0 +1,29 @@
+#!/bin/sh
+# 提交前检查：暂存文件超过 5000 token（约 20000 字节）就拦下，提示按功能拆文件。
+# 理由：agent 每次要读整个文件，单文件越大越费上下文、越容易改东忘西。
+# 跳过 agent 不会逐行读的文件：lockfile、自动生成代码、构建产物、图片、dump 数据。
+# 历史大文件白名单：这两个在首次提交时就已超标，属既有债务，不阻塞后续提交；
+# 2026-11-23 用户确认豁免。其余文件仍按 LIMIT 拦截。
+
+LIMIT=20000
+BAD=0
+
+for f in $(git diff --cached --name-only --diff-filter=ACM); do
+  case "$f" in
+    web/app.js|tools/ocr_server.py) continue ;;
+    *.png|*.jpg|*.jpeg|*.gif|*.webp|*.ico|*.pdf|*.zip|*.pyc) continue ;;
+    *.lock|package-lock.json|yarn.lock|pnpm-lock.yaml) continue ;;
+    *.min.js|*.min.css|*generated*|node_modules/*|dist/*|build/*) continue ;;
+    tests/screenshots/*|tests/raw_page*.json|tests/ocr_result.json|*_dump.json) continue ;;
+  esac
+  [ -f "$f" ] || continue
+  size=$(wc -c < "$f" | tr -d ' ')
+  if [ "$size" -gt "$LIMIT" ]; then
+    echo "BLOCKED: $f 有 $size 字节（约 $((size / 4)) token），超过 $LIMIT 字节（约 5000 token）。" >&2
+    echo "请按功能把它拆成几个文件后再提交。" >&2
+    BAD=1
+  fi
+done
+
+[ "$BAD" -eq 1 ] && exit 1
+exit 0

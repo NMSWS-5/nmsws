@@ -2,17 +2,18 @@
   'use strict';
 
   // ============ 数据模型（可拓展） ============
-  // config: 课表全局配置
-  //   { version, term, classMode, sections, days, dayLabels[], sectionTimes[],
-  //     totalWeeks, semesterStart }
-  // course: 单门课程
-  //   { id, name, teacher, location, color, day(1-7), start, end,
-  //     week('all'|'odd'|'even'|数字), note }
-  // view: { currentWeek }
-  // 拓展点：week 支持单双周与具体周；可加 termList 多学期；可加 remind 提醒字段；
+  // store: { tables:[ {id, name, config, courses, view} ], activeId }
+  //   config: { version, term, classMode, sections, days, dayLabels[], sectionTimes[],
+  //             totalWeeks, semesterStart }
+  //   course: { id, name, teacher, location, color, day(1-7), start, end,
+  //             week('all'|'odd'|'even'|数字), note }
+  //   view: { currentWeek }
+  // 每张课表（学期）独立保存 config/courses/view；切换=换 activeId。
+  // 拓展点：week 支持单双周与具体周；可加 remind 提醒字段；
   //        可加 importFromCloud() 实现网页版<->小程序版同步（共用同一 JSON 结构）。
 
-  var STORAGE_KEY = 'schedule.v1';
+  var STORAGE_KEY = 'schedule.v2';
+  var LEGACY_KEY = 'schedule.v1';
   var DAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
   function fmtMin(m) {
@@ -60,6 +61,35 @@
     return cfg;
   }
 
+  // ===== 应用内提示/确认：预览面板 iframe 会拦截原生 alert/confirm，一律不用原生弹窗 =====
+  var toastEl = document.getElementById('toast');
+  var toastTimer = null;
+  function showToast(msg, ms) {
+    if (!toastEl) return;
+    toastEl.textContent = msg;
+    toastEl.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.classList.add('hidden'); }, ms || 2600);
+  }
+  var confirmBox = document.getElementById('confirmBox');
+  var confirmResolve = null;
+  function askConfirm(msg, title) {
+    return new Promise(function (resolve) {
+      if (!confirmBox) return resolve(window.confirm ? window.confirm(msg) : false);
+      document.getElementById('confirmTitle').textContent = title || '请确认';
+      document.getElementById('confirmMsg').textContent = msg;
+      confirmBox.classList.remove('hidden');
+      confirmResolve = resolve;
+    });
+  }
+  function closeConfirm(result) {
+    if (confirmBox) confirmBox.classList.add('hidden');
+    var r = confirmResolve; confirmResolve = null;
+    if (r) r(result);
+  }
+  document.getElementById('confirmYes').addEventListener('click', function () { closeConfirm(true); });
+  document.getElementById('confirmNo').addEventListener('click', function () { closeConfirm(false); });
+
   var config = defaultConfig();
   var courses = [];
   var currentWeek = 1;
@@ -68,29 +98,85 @@
   var edgeTimer = null;      // 边缘停留切换周的计时器
   var suppressClick = false; // 滑动后抑制误触发的 click
 
+  // ===== 多课表状态 =====
+  var store = { tables: [], activeId: null };
+  function newId() { return 't' + Date.now() + Math.floor(Math.random() * 1000); }
+  function normalizeTable(t) {
+    var cfg = Object.assign(defaultConfig(), t.config || {});
+    if (typeof cfg.totalWeeks !== 'number' || cfg.totalWeeks < 1) cfg.totalWeeks = 20;
+    if (!Array.isArray(cfg.sectionTimes) || cfg.sectionTimes.length !== cfg.sections) {
+      cfg.sectionTimes = (cfg.classMode === 'big')
+        ? (cfg.sections <= 4 ? genBigTimes() : genDefaultTimes(cfg.sections))
+        : genDefaultTimes(cfg.sections);
+    }
+    var cs = Array.isArray(t.courses) ? t.courses.map(function (c) {
+      if (c.week == null) c.week = (c.weeks || 'all'); // 兼容旧字段
+      return c;
+    }) : [];
+    var wk = (t.view && typeof t.view.currentWeek === 'number') ? t.view.currentWeek : 1;
+    wk = Math.min(Math.max(wk, 1), cfg.totalWeeks);
+    return {
+      id: t.id || newId(),
+      name: t.name || cfg.term || '我的课表',
+      config: cfg, courses: cs, view: { currentWeek: wk }
+    };
+  }
+  function makeEmptyTable(name) {
+    return normalizeTable({ id: newId(), name: name || '新课表', config: defaultConfig(), courses: [], view: { currentWeek: 1 } });
+  }
+  function activeTable() {
+    for (var i = 0; i < store.tables.length; i++) {
+      if (store.tables[i].id === store.activeId) return store.tables[i];
+    }
+    return null;
+  }
+  function pullActiveIntoView() {
+    var t = activeTable();
+    if (!t) return;
+    config = t.config; courses = t.courses; currentWeek = t.view.currentWeek;
+  }
+  function pushViewIntoActive() {
+    var t = activeTable();
+    if (!t) return;
+    t.config = config; t.courses = courses; t.view = { currentWeek: currentWeek };
+  }
+  function persist() { localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); }
+
   function load() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      var data = JSON.parse(raw);
-      config = Object.assign(defaultConfig(), data.config || {});
-      if (typeof config.totalWeeks !== 'number' || config.totalWeeks < 1) config.totalWeeks = 20;
-      if (!Array.isArray(config.sectionTimes) || config.sectionTimes.length !== config.sections) {
-        config.sectionTimes = (config.classMode === 'big')
-          ? (config.sections <= 4 ? genBigTimes() : genDefaultTimes(config.sections))
-          : genDefaultTimes(config.sections);
+      if (raw) {
+        var data = JSON.parse(raw);
+        if (data && Array.isArray(data.tables) && data.tables.length) {
+          store.tables = data.tables.map(normalizeTable);
+          store.activeId = data.activeId;
+          if (!activeTable()) store.activeId = store.tables[0].id;
+        }
+      } else {
+        // 首次：迁移旧的单课表数据（schedule.v1）为第一张表
+        var legacyRaw = localStorage.getItem(LEGACY_KEY);
+        var first;
+        if (legacyRaw) {
+          try {
+            var old = JSON.parse(legacyRaw);
+            first = normalizeTable({ id: newId(), name: (old.config && old.config.term) || '2026 秋季学期',
+              config: old.config || {}, courses: old.courses || [], view: old.view || {} });
+          } catch (e) { first = null; }
+        }
+        if (!first) first = normalizeTable({ id: newId(), name: '2026 秋季学期', config: defaultConfig(), courses: [], view: { currentWeek: 1 } });
+        store.tables = [first];
+        store.activeId = first.id;
+        persist();
       }
-      courses = Array.isArray(data.courses) ? data.courses.map(function (c) {
-        if (c.week == null) c.week = (c.weeks || 'all'); // 兼容旧字段
-        return c;
-      }) : [];
-      if (data.view && typeof data.view.currentWeek === 'number') {
-        currentWeek = Math.min(Math.max(data.view.currentWeek, 1), config.totalWeeks);
-      }
-    } catch (e) { console.error('读取本地数据失败', e); }
+    } catch (e) {
+      console.error('读取本地数据失败', e);
+      if (!store.tables.length) { var t = makeEmptyTable('2026 秋季学期'); store.tables = [t]; store.activeId = t.id; }
+    }
+    pullActiveIntoView();
   }
   function save() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ config: config, courses: courses, view: { currentWeek: currentWeek } }));
+    pushViewIntoActive();
+    persist();
   }
 
   // 课程是否出现在指定周（支持：'all'|'odd'|'even'|数字|'a-b'范围|数字数组）
@@ -135,7 +221,10 @@
 
   // ============ 渲染 ============
   var grid = document.getElementById('grid');
-  var termInput = document.getElementById('termInput');
+  var tableBtn = document.getElementById('tableBtn');
+  var tableBtnName = document.getElementById('tableBtnName');
+  var tableMenu = document.getElementById('tableMenu');
+  var tableSwitcher = document.querySelector('.table-switcher');
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"]/g, function (m) {
@@ -161,7 +250,7 @@
   }
 
   function render() {
-    termInput.value = config.term || '';
+    tableBtnName.textContent = (activeTable() && activeTable().name) || config.term || '我的课表';
     grid.innerHTML = '';
     grid.classList.toggle('bigmode', config.classMode === 'big');
     updateWeekBar();
@@ -254,6 +343,24 @@
     }
     // 仅渲染当前周可见的课程
     courses.filter(function (c) { return weekMatches(c.week, currentWeek); }).forEach(placeCourse);
+    fitGridHeight();
+  }
+
+  // 课表高度铺满视口：按可用高度和节数算每行高度，写进 CSS 变量
+  function fitGridHeight() {
+    var headRow = grid && grid.querySelector('tr');
+    if (!headRow || !config.sections) return;
+    var main = document.querySelector('main');
+    var topbar = document.querySelector('.topbar');
+    var headH = headRow.getBoundingClientRect().height;
+    var mainStyle = main ? getComputedStyle(main) : null;
+    var padT = mainStyle ? parseFloat(mainStyle.paddingTop) : 0;
+    var padB = mainStyle ? parseFloat(mainStyle.paddingBottom) : 0;
+    var topH = topbar ? topbar.getBoundingClientRect().height : 0;
+    var available = window.innerHeight - topH - padT - padB - headH - 2;
+    var cellH = Math.floor(available / config.sections);
+    cellH = Math.max(52, Math.min(cellH, 260));
+    grid.style.setProperty('--cell-h', cellH + 'px');
   }
 
   function placeCourse(c) {
@@ -401,7 +508,7 @@
     e.preventDefault();
     var start = parseInt(form.fStart.value, 10);
     var end = parseInt(form.fEnd.value, 10);
-    if (isNaN(start) || isNaN(end) || start < 1 || end < start) { alert('节次填写有误'); return; }
+    if (isNaN(start) || isNaN(end) || start < 1 || end < start) { showToast('节次填写有误'); return; }
     var custom = form.fWeeksCustom.value.trim();
     var week;
     if (custom) {
@@ -420,7 +527,7 @@
       color: form.fColor.value,
       note: form.fNote.value.trim()
     };
-    if (!data.name) { alert('请填写课程名称'); return; }
+    if (!data.name) { showToast('请填写课程名称'); return; }
     if (editingId) {
       var i = courses.findIndex(function (c) { return c.id === editingId; });
       if (i >= 0) courses[i] = Object.assign(courses[i], data);
@@ -431,10 +538,12 @@
     save(); render(); closeEditor();
   });
   btnDelete.addEventListener('click', function () {
-    if (editingId && confirm('确定删除该课程？')) {
+    if (!editingId) return;
+    askConfirm('确定删除该课程？').then(function (ok) {
+      if (!ok) return;
       courses = courses.filter(function (c) { return c.id !== editingId; });
       save(); render(); closeEditor();
-    }
+    });
   });
   document.getElementById('btnCancel').addEventListener('click', closeEditor);
   editor.addEventListener('click', function (e) { if (e.target === editor) closeEditor(); });
@@ -448,6 +557,7 @@
   var settings = document.getElementById('settings');
   var sForm = document.getElementById('settingsForm');
   document.getElementById('btnSettings').addEventListener('click', function () {
+    document.getElementById('sName').value = (activeTable() && activeTable().name) || config.term || '';
     document.getElementById('sMode').value = config.classMode || 'small';
     document.getElementById('sSections').value = config.sections;
     document.getElementById('sDays').value = config.days;
@@ -494,14 +604,84 @@
     config.sections = sec; config.days = days;
     config.totalWeeks = tw;
     config.semesterStart = document.getElementById('sSemStart').value || '';
+    var newName = document.getElementById('sName').value.trim();
+    if (newName) { config.term = newName; var at = activeTable(); if (at) at.name = newName; }
     if (currentWeek > tw) currentWeek = tw;
     buildWeekGrid();
     save(); render(); settings.classList.add('hidden');
   });
   document.getElementById('sCancel').addEventListener('click', function () { settings.classList.add('hidden'); });
 
-  // ============ 学期名 ============
-  termInput.addEventListener('change', function () { config.term = termInput.value.trim(); save(); });
+  // ============ 多课表：下拉切换 / 新建 / 删除 ============
+  function renderTableMenu() {
+    var items = store.tables.map(function (t) {
+      var active = t.id === store.activeId;
+      return '<button type="button" class="tm-item' + (active ? ' active' : '') + '" data-id="' + esc(t.id) + '">' +
+        '<span class="tm-name">' + esc(t.name) + '</span>' +
+        (active ? '<span class="tm-check">✓</span>' : '') + '</button>';
+    }).join('');
+    tableMenu.innerHTML = '<div class="tm-title">切换课表</div>' + items +
+      '<button type="button" class="tm-new" id="tmNew">＋ 新建课表（新学期）</button>';
+    tableMenu.querySelectorAll('.tm-item').forEach(function (el) {
+      el.addEventListener('click', function () { switchTable(el.dataset.id); });
+    });
+    document.getElementById('tmNew').addEventListener('click', newTable);
+  }
+  function openTableMenu() {
+    renderTableMenu();
+    tableMenu.classList.remove('hidden');
+    tableSwitcher.classList.add('open');
+  }
+  function closeTableMenu() {
+    tableMenu.classList.add('hidden');
+    tableSwitcher.classList.remove('open');
+  }
+  function switchTable(id) {
+    if (id === store.activeId) { closeTableMenu(); return; }
+    save();                       // 先把当前表存回去
+    store.activeId = id;
+    pullActiveIntoView();
+    persist();
+    buildWeekGrid(); render(); closeTableMenu();
+    showToast('已切换到「' + ((activeTable() && activeTable().name) || '') + '」');
+  }
+  function newTable() {
+    save();
+    var t = makeEmptyTable('新课表');
+    store.tables.push(t);
+    store.activeId = t.id;
+    pullActiveIntoView();
+    persist();
+    buildWeekGrid(); render(); closeTableMenu();
+    showToast('已新建「新课表」，可在设置里改名');
+  }
+  function deleteCurrentTable() {
+    if (store.tables.length <= 1) {
+      // 最后一张不允许删除，改为清空该表课程
+      askConfirm('这是最后一张课表，无法删除。是否清空这张课表的所有课程？', '清空课程').then(function (ok) {
+        if (!ok) return;
+        courses = []; save(); render(); showToast('已清空课程');
+      });
+      return;
+    }
+    var cur = activeTable();
+    askConfirm('确定删除课表「' + (cur ? cur.name : '') + '」？删除后不可恢复（建议先导出备份）。', '删除课表').then(function (ok) {
+      if (!ok) return;
+      store.tables = store.tables.filter(function (t) { return t.id !== store.activeId; });
+      store.activeId = store.tables[0].id;
+      pullActiveIntoView();
+      persist();
+      buildWeekGrid(); render();
+      showToast('已删除课表');
+    });
+  }
+  tableBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (tableMenu.classList.contains('hidden')) openTableMenu(); else closeTableMenu();
+  });
+  document.addEventListener('click', function (e) {
+    if (!tableSwitcher.contains(e.target)) closeTableMenu();
+  });
 
   // ============ 周导航按钮 ============
   document.getElementById('prevWeek').addEventListener('click', function () { goWeek(currentWeek - 1); });
@@ -517,7 +697,16 @@
     URL.revokeObjectURL(a.href);
   });
   var fileInput = document.getElementById('fileInput');
-  document.getElementById('btnImport').addEventListener('click', function () { fileInput.click(); });
+  var pdfInput = document.getElementById('pdfInput');
+  // 合并导入：点「导入」先弹选择，再选 JSON / PDF
+  var importModal = document.getElementById('importModal');
+  function openImportModal() { importModal.classList.remove('hidden'); }
+  function closeImportModal() { importModal.classList.add('hidden'); }
+  document.getElementById('btnImport').addEventListener('click', openImportModal);
+  document.getElementById('importCancel').addEventListener('click', closeImportModal);
+  importModal.addEventListener('click', function (e) { if (e.target === importModal) closeImportModal(); });
+  document.getElementById('importJson').addEventListener('click', function () { closeImportModal(); fileInput.click(); });
+  document.getElementById('importPdf').addEventListener('click', function () { closeImportModal(); pdfInput.click(); });
   fileInput.addEventListener('change', function () {
     var f = fileInput.files[0]; if (!f) return;
     var r = new FileReader();
@@ -532,22 +721,21 @@
         if (data.view && typeof data.view.currentWeek === 'number') currentWeek = Math.min(Math.max(data.view.currentWeek, 1), config.totalWeeks);
         buildWeekGrid();
         save(); render();
-      } catch (e) { alert('文件格式不正确'); }
+      } catch (e) { showToast('文件格式不正确'); }
     };
     r.readAsText(f);
     fileInput.value = '';
   });
 
   // ============ 清空 ============
-  document.getElementById('btnClear').addEventListener('click', function () {
-    if (confirm('确定清空所有课程？（设置保留）')) { courses = []; save(); render(); }
-  });
+  document.getElementById('btnClear').addEventListener('click', deleteCurrentTable);
 
   // ============ PDF 导入（文字 PDF 直接提取；图片 PDF 走 OCR） ============
   var pdfModal = document.getElementById('pdfModal');
   var pdfStatus = document.getElementById('pdfStatus');
   var pdfTable = document.getElementById('pdfTable');
   var pdfConfirm = document.getElementById('pdfConfirm');
+  var pdfAppend = document.getElementById('pdfAppend');
   var pdfCourses = [];
 
   function loadScript(src) {
@@ -571,8 +759,12 @@
     openPdfModal('正在读取 PDF…');
     var reader = new FileReader();
     reader.onload = function () {
-      var buf = new Uint8Array(reader.result);
-      runPdfImport(buf).catch(function (e) {
+      var bytes = new Uint8Array(reader.result);
+      var bin = '', CHUNK = 0x8000;
+      for (var i = 0; i < bytes.length; i += CHUNK) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+      }
+      runPdfImport(btoa(bin)).catch(function (e) {
         setPdfStatus('导入失败：' + (e && e.message ? e.message : e) + '。可改用「导入JSON」。');
       });
     };
@@ -580,20 +772,27 @@
     reader.readAsArrayBuffer(file);
   }
 
-  function runPdfImport(buf) {
-    return Promise.resolve().then(function () {
-      setPdfStatus('正在加载 PDF 解析库…');
-      return loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
-    }).then(function () {
-      var pdfjs = window['pdfjsLib'];
-      pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      return pdfjs.getDocument({ data: buf }).promise;
-    }).then(function (doc) {
-      return extractWords(doc);
-    }).then(function (words) {
-      if (words.length < 5) throw new Error('未能从 PDF 中识别到任何文字（可能是加密或特殊格式）');
-      setPdfStatus('已识别文字，正在解析课表结构…');
-      var list = buildCoursesFromWords(words);
+  // 本地服务转发 -> 腾讯云表格识别 V3；识别结果仍走现有核对表格
+  function runPdfImport(b64) {
+    setPdfStatus('正在上传 PDF 并调用腾讯云表格识别（可能需要十几秒）…');
+    return fetch('/api/ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdfBase64: b64 })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok || !j.ok) {
+          var msg = j.error || ('HTTP ' + r.status);
+          if (r.status === 503 || j.configured === false) msg += '（先配置 .env 密钥并重启服务）';
+          throw new Error(msg);
+        }
+        return j;
+      });
+    }).then(function (j) {
+      var list = j.courses || [];
+      if (!list.length) throw new Error('未识别到课程，请确认 PDF 内容或改用「导入JSON」');
+      var pg = (j.pages || []).length;
+      setPdfStatus('云端识别完成：' + pg + ' 页 / ' + list.length + ' 门课。请核对下方表格后导入。');
       finishPdfImport(list);
     });
   }
@@ -767,6 +966,7 @@
     renderPdfTable();
     setPdfStatus('共识别 ' + list.length + ' 门课程。请核对「星期 / 节次 / 周次」，可直接修改，确认后导入。');
     pdfConfirm.disabled = false;
+    pdfAppend.disabled = false;
   }
 
   function renderPdfTable() {
@@ -794,25 +994,43 @@
     });
   }
 
-  document.getElementById('btnImportPdf').addEventListener('click', function () { pdfInput.click(); });
   pdfInput.addEventListener('change', function () {
     var f = pdfInput.files[0]; if (!f) return;
     importPdf(f); pdfInput.value = '';
   });
   document.getElementById('pdfCancel').addEventListener('click', closePdfModal);
   pdfModal.addEventListener('click', function (e) { if (e.target === pdfModal) closePdfModal(); });
-  pdfConfirm.addEventListener('click', function () {
-    pdfCourses.forEach(function (c) {
-      c.id = 'c' + Date.now() + Math.floor(Math.random() * 1000);
-      c.week = parseWeekInput(Array.isArray(c.week) ? c.week.join(',') : String(c.week));
-      c.end = c.start;
+  function commitPdfImport(mode) {
+    var incoming = pdfCourses.map(function (c) {
+      return {
+        id: 'c' + Date.now() + Math.floor(Math.random() * 1000),
+        name: c.name, teacher: c.teacher || '', location: c.location || '',
+        day: +c.day, start: +c.start, end: +c.start,
+        week: parseWeekInput(Array.isArray(c.week) ? c.week.join(',') : String(c.week)),
+        color: c.color || '#4f86f7', note: c.note || ''
+      };
     });
-    courses = courses.concat(pdfCourses);
+    // 默认「替换」：不清旧数据会导致每次导入叠加、同一门课显示多份。
+    courses = (mode === 'append') ? courses.concat(incoming) : incoming;
     save(); render(); closePdfModal();
-    alert('已导入 ' + pdfCourses.length + ' 门课程，可在「导出JSON」中备份。');
+    showToast('已' + (mode === 'append' ? '追加' : '替换') + '导入 ' + incoming.length + ' 门课程。');
+  }
+  pdfConfirm.addEventListener('click', function () { commitPdfImport('replace'); });
+  pdfAppend.addEventListener('click', function () {
+    askConfirm('把识别结果加到现有课程后面？若课表已有这些课，可能出现重复。', '追加导入').then(function (ok) {
+      if (ok) commitPdfImport('append');
+    });
+  });
+
+  // 窗口尺寸变化时重新铺满（防抖）
+  var fitTimer = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(fitTimer);
+    fitTimer = setTimeout(fitGridHeight, 120);
   });
 
   // ============ 启动 ============
-  buildWeekGrid();
-  load(); render();
+  load();            // 先读出当前课表（含旧数据迁移）
+  buildWeekGrid();   // 再按该课表的节次数建网格
+  render();
 })();

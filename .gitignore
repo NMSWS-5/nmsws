@@ -6,3 +6,8 @@ dist/
 .DS_Store
 Thumbs.db
 *.tmp
+
+# 腾讯云密钥（绝不可提交）
+.env
+*.env
+tools/__pycache__/

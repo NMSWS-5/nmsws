@@ -4,35 +4,36 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>我的课表</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20261123k" />
 </head>
 <body>
   <header class="topbar">
-    <div class="title-wrap">
-      <span class="app-title">📅 我的课表</span>
-      <input id="termInput" class="term-input" placeholder="如：2026 秋季学期" />
+    <div class="top-left">
+      <button id="btnSettings" class="icon-text-btn" title="课表设置">设置</button>
+      <!-- 周次导航（缩小，放在学期切换器左侧） -->
+      <div class="weekbar">
+        <button id="prevWeek" class="wk-btn" title="上一周">‹</button>
+        <div class="wk-center">
+          <div id="weekLabel" class="wk-label">第 1 周</div>
+          <div id="weekSub" class="wk-sub">共 20 周</div>
+        </div>
+        <button id="nextWeek" class="wk-btn" title="下一周">›</button>
+      </div>
+      <div class="table-switcher">
+        <button id="tableBtn" class="table-btn" title="切换课表">
+          <span id="tableBtnName">2026 秋季学期</span><span class="table-caret">▾</span>
+        </button>
+        <div id="tableMenu" class="table-menu hidden"></div>
+      </div>
     </div>
     <div class="actions">
-      <button id="btnSettings" title="设置">⚙ 设置</button>
-      <button id="btnExport" title="导出JSON">⬇ 导出</button>
-      <button id="btnImport" title="导入JSON">⬆ 导入JSON</button>
-      <button id="btnImportPdf" title="导入PDF（图片/文字均可）">⬆ 导入PDF</button>
-      <button id="btnClear" class="danger" title="清空课程">🗑 清空</button>
+      <button id="btnExport" title="导出JSON">导出</button>
+      <button id="btnImport" title="导入（JSON / PDF）" class="primary">导入</button>
+      <button id="btnClear" class="danger" title="删除当前课表">删除课表</button>
       <input type="file" id="fileInput" accept="application/json" hidden />
       <input type="file" id="pdfInput" accept="application/pdf" hidden />
     </div>
   </header>
-
-  <!-- 周次导航栏 -->
-  <div class="weekbar">
-    <button id="prevWeek" class="wk-btn" title="上一周">‹</button>
-    <div class="wk-center">
-      <div id="weekLabel" class="wk-label">第 1 周</div>
-      <div id="weekSub" class="wk-sub">共 20 周</div>
-    </div>
-    <button id="nextWeek" class="wk-btn" title="下一周">›</button>
-  </div>
-  <div class="week-hint">提示：点 ‹ › 或拖动课表空白处左右滑动可切换周次；拖动课程到边缘停留可换到相邻周并与之互换。</div>
 
   <main>
     <table id="grid" class="grid"></table>
@@ -89,19 +90,27 @@
 
   <!-- 设置弹窗 -->
   <div id="settings" class="modal hidden">
-    <div class="modal-box">
+    <div class="modal-box settings-box">
       <h3>课表设置</h3>
       <form id="settingsForm">
+        <div class="set-group-title">基本信息</div>
+        <label>课表名称（学期）<input name="sName" id="sName" type="text" maxlength="40" placeholder="如：2026 秋季学期" /></label>
+        <div class="set-group-title">课表结构</div>
         <label>课表粒度（每格代表）
           <select name="sMode" id="sMode">
             <option value="big">大节（每格一大节，默认 4 格）</option>
             <option value="small">小节（每格一节课，默认 8 格）</option>
           </select>
         </label>
-        <label>每天节次数（1-20）<input name="sSections" id="sSections" type="number" min="1" max="20" value="12" /></label>
-        <label>星期数（5 或 7）<input name="sDays" id="sDays" type="number" min="5" max="7" value="7" /></label>
-        <label>总周数（如 20）<input name="sTotalWeeks" id="sTotalWeeks" type="number" min="1" max="40" value="20" /></label>
-        <label>开学日期（第1周周一，用于表头显示日期，可留空）<input name="sSemStart" id="sSemStart" type="date" /></label>
+        <div class="row2">
+          <label>每天节次数（1-20）<input name="sSections" id="sSections" type="number" min="1" max="20" value="12" /></label>
+          <label>星期数（5 或 7）<input name="sDays" id="sDays" type="number" min="5" max="7" value="7" /></label>
+        </div>
+        <div class="row2">
+          <label>总周数（如 20）<input name="sTotalWeeks" id="sTotalWeeks" type="number" min="1" max="40" value="20" /></label>
+          <label>开学日期（第1周周一）<input name="sSemStart" id="sSemStart" type="date" /></label>
+        </div>
+        <div class="set-group-title">作息时间</div>
         <label>每节时间表（一行一节，如 08:00–09:40，留空用默认）<textarea name="sTimes" id="sTimes" rows="4"></textarea></label>
         <div class="modal-actions">
           <span class="spacer"></span>
@@ -111,8 +120,6 @@
       </form>
     </div>
   </div>
-
-  <footer class="hint">点击空格子添加课程，点击课程块可编辑/删除；按住课程块拖到别的格子即可换课/调休。⚙ 设置里可切换「大节 / 小节」粒度、改节次数、总周数与开学日期。支持导入 PDF（图片/文字均可）与 JSON，数据自动保存在本浏览器。</footer>
 
   <!-- PDF 导入核对弹窗 -->
   <div id="pdfModal" class="modal hidden">
@@ -125,11 +132,46 @@
       <div class="modal-actions">
         <span class="spacer"></span>
         <button type="button" id="pdfCancel" class="danger">取消</button>
-        <button type="button" id="pdfConfirm" class="primary" disabled>确认导入</button>
+        <button type="button" id="pdfAppend" disabled>追加到现有</button>
+        <button type="button" id="pdfConfirm" class="primary" disabled>替换并导入</button>
       </div>
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <!-- 导入方式选择弹窗 -->
+  <div id="importModal" class="modal hidden">
+    <div class="modal-box import-box">
+      <h3>选择导入方式</h3>
+      <p class="import-sub">要导入哪种文件？</p>
+      <div class="import-options">
+        <button type="button" id="importJson" class="import-opt">
+          <span class="import-opt-text"><b>JSON 文件</b><small>导入之前导出的课表数据</small></span>
+        </button>
+        <button type="button" id="importPdf" class="import-opt">
+          <span class="import-opt-text"><b>PDF 课表</b><small>自动识别图片/文字并转成课程</small></span>
+        </button>
+      </div>
+      <div class="modal-actions">
+        <span class="spacer"></span>
+        <button type="button" id="importCancel">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 应用内提示/确认，替代原生 alert/confirm（预览面板 iframe 会拦截原生弹窗） -->
+  <div id="toast" class="toast hidden"></div>
+  <div id="confirmBox" class="modal hidden">
+    <div class="modal-box confirm-box">
+      <h3 id="confirmTitle">请确认</h3>
+      <p id="confirmMsg" class="confirm-msg"></p>
+      <div class="modal-actions">
+        <span class="spacer"></span>
+        <button type="button" id="confirmNo">取消</button>
+        <button type="button" id="confirmYes" class="danger">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=20261123k"></script>
 </body>
 </html>

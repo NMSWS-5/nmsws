@@ -23,11 +23,17 @@ npx serve web
 然后访问 `http://127.0.0.1:8080/`。
 
 ## 数据模型（网页版 ↔ 小程序版共用）
-- `config`：学期、粒度、节次数、星期数、总周数、开学日期、每节时间表。
-- `courses[]`：每门课 `{ name, teacher, location, day, start, end, week, color, note }`。
-- `view.currentWeek`：当前所在周。
+数据存在 `localStorage['schedule.v2']`，可挂多张课表（如不同学期），切换只换 `activeId`：
 
-导入示例见 `课表数据.json`（由教务系统导出的 PDF 转写而来）。
+- `tables[]`：每张课表 `{ id, name, config, courses, view }`，各自独立。
+  - `config`：学期、粒度（大节/小节）、节次数、星期数、总周数、开学日期、每节时间表。
+  - `courses[]`：每门课 `{ id, name, teacher, location, color, day(1-7), start, end, week, note }`；`week` 可为 `all`/`odd`/`even`/数字/`a-b` 范围/数组。
+  - `view`：`{ currentWeek }` 当前所在周，每张表独立。
+- `activeId`：当前选中的课表 id。
+
+旧版单课表数据（`localStorage['schedule.v1']`）首次打开会自动迁移为第一张表。
+
+导入示例见 `课表数据.json`（由教务系统导出的 PDF 转写而来，为旧版单课表结构，导入后自动迁移）。
 
 ## 目录
 - `web/`：`index.html` / `styles.css` / `app.js`（主程序）
